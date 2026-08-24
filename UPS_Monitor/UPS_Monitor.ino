@@ -1,6 +1,9 @@
 #include <WiFi.h>
 #include <Preferences.h>
 #include <ESPAsyncWebServer.h>
+// Вказуємо ElegantOTA використовувати асинхронний сервер,
+// щоб уникнути конфлікту HTTP-методів
+#define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
 #include <ElegantOTA.h>
 #include "config.h"
 #include "ina3221.h"
@@ -87,8 +90,15 @@ void setupRoutes() {
     ESP.restart();
   });
 
+  // Ендпоінт для ручного перезавантаження з UI
+  server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request){
+    request->send(200, "text/plain", "Перезавантаження...");
+    delay(1500); // Даємо час на відправку пакета перед рестартом
+    ESP.restart();
+  });
+
   server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request){
-    String json = "{\"channels\":[";
+    String json = "{\"version\":\"" + String(FW_VERSION) + "\",\"channels\":[";
     for (int ch = 1; ch <= 3; ch++) {
       Reading r = ina.read(ch);
       json += "{\"label\":\"" + String(CH_CAL[ch-1].label) + "\",";
@@ -115,6 +125,7 @@ void setup() {
   }
 
   ElegantOTA.begin(&server, OTA_USER, OTA_PASS);
+  
   setupRoutes();
   server.begin();
 }
