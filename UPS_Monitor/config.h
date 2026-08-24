@@ -14,9 +14,9 @@ struct ChannelCal {
 };
 
 static const ChannelCal CH_CAL[3] = {
-  {8.947f, 0.294f, "PSU in"},
-  {9.050f, 0.315f, "NAS out"},
-  {8.966f, 0.322f, "Battery"}
+  {8.947f, 0.294f, "Battery"},
+  {9.050f, 0.315f, "PSU in"},
+  {8.966f, 0.322f, "UPS out"}
 };
 
 // Current below this magnitude (mA) is treated as 0 (noise floor / deadband)
