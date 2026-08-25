@@ -29,7 +29,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   <span style="font-size: 0.8rem; color: #777;" id="fw">v-</span>
 </h1>
 <table id="t">
-  <tr><th>Канал</th><th>Напруга</th><th>Струм</th></tr>
+  <tr><th>Канал</th><th>Напруга</th><th>Струм</th><th>Потужність</th></tr>
 </table>
 <footer>
   <div>Оновлено: <span id="ts">-</span> &nbsp;|&nbsp; <a href="/update">OTA оновлення</a> &nbsp;|&nbsp; <a href="/wifi">WiFi та пароль</a></div>
@@ -42,10 +42,10 @@ async function poll() {
     const d = await r.json();
     document.getElementById('fw').textContent = 'v' + d.version;
     const t = document.getElementById('t');
-    t.innerHTML = '<tr><th>Канал</th><th>Напруга</th><th>Струм</th></tr>';
+    t.innerHTML = '<tr><th>Канал</th><th>Напруга</th><th>Струм</th><th>Потужність</th></tr>';
     d.channels.forEach(c => {
       const cls = c.current_mA < 0 ? 'neg' : 'pos';
-      t.innerHTML += `<tr><td>${c.label}</td><td class="val">${c.bus_V.toFixed(2)} В</td><td class="val ${cls}">${(c.current_mA/1000).toFixed(3)} А</td></tr>`;
+      t.innerHTML += `<tr><td>${c.label}</td><td class="val">${c.bus_V.toFixed(2)} В</td><td class="val ${cls}">${(c.current_mA/1000).toFixed(3)} А</td><td class="val ${cls}">${(c.power_mW/1000).toFixed(1)} Вт</td></tr>`;
     });
     document.getElementById('ts').textContent = new Date().toLocaleTimeString();
   } catch (e) { console.error(e); }

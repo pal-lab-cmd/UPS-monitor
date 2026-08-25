@@ -19,6 +19,7 @@ struct Reading {
   float busVoltage_V;
   float shuntVoltage_mV;
   float current_mA;
+  float power_mW;
 };
 
 class INA3221 {
@@ -55,6 +56,7 @@ public:
     r.busVoltage_V = bus_V;
     r.shuntVoltage_mV = shunt_mV;
     r.current_mA = current_mA;
+    r.power_mW = bus_V * current_mA; // Вт*мА = мВт (напруга шини, не з врахуванням падіння на шунті)
     return r;
   }
 

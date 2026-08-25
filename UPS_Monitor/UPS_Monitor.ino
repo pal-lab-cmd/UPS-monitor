@@ -204,6 +204,7 @@ void setupRoutes() {
       c["bus_V"] = serialized(String(r.busVoltage_V, 3));
       c["shunt_mV"] = serialized(String(r.shuntVoltage_mV, 3));
       c["current_mA"] = serialized(String(r.current_mA, 1));
+      c["power_mW"] = serialized(String(r.power_mW, 1));
     }
 
     String json;
