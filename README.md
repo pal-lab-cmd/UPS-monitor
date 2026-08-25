@@ -1,22 +1,98 @@
-# UPS-monitor
-DYI UPS monitoring software for ESP32
+# UPS Monitor
 
+DIY-моніторинг саморобного UPS на базі ESP32-S3 та INA3221. Вимірює напругу/струм/потужність на трьох каналах (вхід від мережі, вихід на навантаження, батарея), віддає дані по мережі як **Network UPS (протокол NUT)** — сумісний, зокрема, з QNAP QTS ("Network UPS slave") — і надає простий веб-інтерфейс для моніторингу та налаштувань.
 
-requirements:
-- Async TCP (from ESP32Async) v.3.5.0+
-- ESP Async WebServer (from ESP32Async) v 3.12+
-- ElegantOTA Lite v3.1.7+
-- ArduinoJson 7.4.3
+## Апаратна частина
 
+- ESP32-S3 (N16R8 або сумісний), I2C на GPIO8 (SDA) / GPIO9 (SCL)
+- INA3221 — 3-канальний монітор напруги/струму, адреса `0x40` (A0 → GND)
+- Заводські шунти R100 доповнені паралельно допаяними R010 (~9 мОм ефективно на канал)
+- Канали (мітки задаються в `config.h`, зараз): `Battery`, `PSU in`, `UPS out`
 
-Default AP SSID: UPS-Monitor-Setup
-Default AP password: 12345678
+## Вимоги (бібліотеки)
 
-OTA user and password should be changed in config.h
+Встановлюються через Arduino Library Manager:
 
-System Password Reset: press Reset, then BOOT button for over 5 sec after reset. Device reset all passwords and requires setup Wifi/admin pass from scratch.
+| Бібліотека | Версія |
+|---|---|
+| Async TCP (ESP32Async) | ≥ 3.5.0 |
+| ESP Async WebServer (ESP32Async) | ≥ 3.12 |
+| ElegantOTA Lite | ≥ 3.1.7 |
+| ArduinoJson | ≥ 7.4.3 |
 
-ina3221_test.ino is used for calibrate INA3221 after changing shunts
-Note: disable external power (DC/DC module) when is using USB connections to avoid power collisions and damage of ESP module
+`build_opt.h` містить `-DELEGANTOTA_USE_ASYNC_WEBSERVER=1` — обов'язково, інакше ElegantOTA спробує підняти власний синхронний сервер і конфліктуватиме з `ESPAsyncWebServer`.
 
+Плата: `ESP32S3 Dev Module`, PSRAM: `OPI PSRAM`, Flash Size: `16MB`.
 
+## Функціонал
+
+- Читання 3 каналів INA3221 (напруга шини, напруга шунта, струм, потужність) з калібруванням опору шунта та офсету нуля окремо на кожен канал (`config.h → CH_CAL`)
+- Дедбенд для струму (`CURRENT_DEADBAND_MA`) — прибирає фантомний струм від офсету на знеструмлених/непідключених каналах
+- Кеш показань, що оновлюється раз на секунду (`SAMPLE_INTERVAL_MS`) в `loop()` — і HTTP, і NUT читають лише з нього, щоб не звертатись до I2C паралельно з різних async-контекстів
+- Веб-інтерфейс (`/`) — таблиця напруга/струм/потужність по каналах, оновлення раз на секунду
+- WiFi: збереження credentials у `Preferences`, автопідключення при старті (до 5 хв спроб), запасний AP-режим для первинного налаштування, ненав'язливе перепідключення в `loop()` при втраті зв'язку
+- OTA-оновлення прошивки через `/update` (ElegantOTA)
+- NUT-сервер (порт 3493) для інтеграції з NAS/іншими системами моніторингу UPS
+- Єдиний пароль доступу (логін завжди `admin`) для WiFi-налаштувань, перезавантаження та OTA; змінюється через UI
+- Factory reset фізичною кнопкою BOOT
+
+## Перший запуск
+
+1. Прошити плату (Arduino IDE, `ESP32S3 Dev Module`)
+2. Підключитись до точки доступу **`UPS-Monitor-Setup`**, пароль **`12345678`**
+3. Відкрити `http://192.168.4.1/`, ввести SSID/пароль домашньої мережі
+4. Пристрій перезавантажиться і підключиться до вказаної мережі
+5. Змінити дефолтний пароль доступу через `/wifi` (розділ "Пароль доступу") — за замовчуванням `change-me`, вказаний у `config.h → AUTH_DEFAULT_PASS`
+
+## Веб-інтерфейс і API
+
+| Роут | Метод | Авторизація | Призначення |
+|---|---|---|---|
+| `/` | GET | немає | Головна сторінка (моніторинг) або форма WiFi-налаштування в AP-режимі |
+| `/api/data` | GET | немає | JSON з поточними показаннями всіх каналів (телеметрія — навмисно відкрита) |
+| `/wifi` | GET | так | Форма зміни WiFi та пароля доступу |
+| `/wifi/save` | POST | так | Збереження SSID/пароля WiFi, перезавантаження |
+| `/api/set-password` | POST | так | Зміна пароля доступу (мін. 8 символів), перезавантаження |
+| `/api/reboot` | POST | так | Ручне перезавантаження пристрою |
+| `/update` | — | так (ElegantOTA) | OTA-оновлення прошивки |
+
+Авторизація — HTTP Basic Auth (логін `admin`, пароль з `Preferences`/`config.h`).
+
+## NUT-сервер (Network UPS Tools)
+
+- Порт: **3493** (стандартний для NUT)
+- Ім'я UPS: `esp32ups` (`config.h → NUT_UPS_NAME`)
+- Підтримані команди: `USERNAME`, `PASSWORD`, `LOGIN`, `LOGOUT`, `PRIMARY`/`MASTER`, `STARTTLS` (коректна відмова), `VER`, `NETVER`, `LIST UPS/VAR/RW/CMD/CLIENT`, `GET VAR/TYPE/DESC/UPSDESC/NUMLOGINS`
+- **Автентифікація не обов'язкова для читання** — `LIST VAR`/`GET VAR` не вимагають попереднього логіну. Це навмисно: QNAP QTS (розділ External Device → UPS → Network UPS slave) не має полів логіну/пароля в принципі, лише IP-адресу сервера — тож для сумісності з ним читання лишається відкритим у локальній мережі
+- `NUT_PASS` перевіряється лише якщо клієнт сам надсилає команду `PASSWORD` (наприклад, `upsmon` на Linux)
+
+### Змінні, які віддає сервер
+
+| Змінна | Джерело |
+|---|---|
+| `device.type`, `device.mfr`/`ups.mfr`, `ups.model`, `ups.firmware` | статичні |
+| `ups.status` | `OL`/`OB` за напругою на каналі `PSU in` (поріг `INPUT_PRESENT_V`), `LB` додається при `battery.voltage` < `BATTERY_LOW_V` |
+| `battery.voltage`, `battery.current` | канал `Battery` |
+| `battery.charge` | **оцінка** за напругою батареї (лінійна інтерполяція між `BATTERY_EMPTY_V` і `BATTERY_FULL_V`) |
+| `input.voltage` | канал `PSU in` |
+| `output.voltage`, `output.current` | канал `UPS out` |
+| `ups.power`/`ups.realpower`, `ups.load` | розраховуються з каналу `UPS out`, `ups.load` — % від `UPS_RATED_POWER_W` |
+
+**Обмеження `battery.charge`:** LiFePO4 має дуже плоску розрядну криву, тож оцінка заряду лише за напругою неточна в середині діапазону (~20–90%). Точніший варіант — coulomb counting (інтегрування виміряного струму батареї в часі); апаратно для цього все є, у планах.
+
+## Калібрування INA3221
+
+Окремий скетч `ina3221_test.ino` — для повторного калібрування після заміни/переприпаювання шунтів. Методика: подати на канал два різних відомих струми (звірені мультиметром послідовно в розриві кола), розв'язати систему `V = offset + I·R` для визначення `rShunt_mOhm` та `offset_mV`, підставити значення в `config.h → CH_CAL`. Одноточкове калібрування (лише за одним відомим струмом) дає помітну похибку на малих струмах — саме тому модель двопараметрична (нахил + офсет), а не проста пропорція.
+
+## Безпека
+
+- **Живлення:** не підключайте USB одночасно із зовнішнім живленням від DC-DC модуля — обидва джерела намагатимуться видати 3,3В на той самий пін, що може пошкодити бортовий регулятор
+- **Скидання пароля:** затиснути кнопку **BOOT** на 5+ секунд під час старту (Reset → тримати BOOT) — скидає WiFi-credentials і пароль доступу до заводських значень. Навмисно немає жодного механізму відновлення пароля через мережу — це вимагало б вбудованого "backdoor", що є неприйнятним компромісом безпеки для пристрою в домашній мережі
+- Перед реальним розгортанням обов'язково змінити дефолтні значення в `config.h`: `AP_PASS`, `AUTH_DEFAULT_PASS`, `NUT_PASS`
+
+## Плани / відомі обмеження
+
+- `battery.charge` — точніша оцінка через coulomb counting замість лінійної інтерполяції за напругою
+- `NUT_PASS` поки задається лише в `config.h`, не через UI (на відміну від `AUTH_DEFAULT_PASS`)
+- Немає інстант-команд NUT (`LIST CMD` завжди порожній) — керування (наприклад, тестовий розряд) не реалізовано
+- Немає збереження історії показань — лише поточний стан

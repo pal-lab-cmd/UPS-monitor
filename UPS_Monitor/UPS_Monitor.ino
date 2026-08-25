@@ -9,6 +9,7 @@
 #include "config.h"
 #include "ina3221.h"
 #include "web_pages.h"
+#include "nut_server.h"
 
 Preferences prefs;
 AsyncWebServer server(80);
@@ -17,6 +18,20 @@ INA3221 ina;
 bool apMode = false;
 String authPass;                 // поточний пароль доступу (RAM-кеш значення з Preferences)
 uint32_t lastWifiCheckMs = 0;
+
+// Кеш показань усіх трьох каналів - і HTTP /api/data, і NUT-сервер читають
+// лише звідси, а не смикають I2C напряму з кожного запиту (обидва можуть
+// виконуватись у різних async-контекстах, паралельний I2C - ризик).
+Reading cachedReadings[3];
+uint32_t lastSampleMs = 0;
+
+void sampleReadings() {
+  if (millis() - lastSampleMs < SAMPLE_INTERVAL_MS) return;
+  lastSampleMs = millis();
+  for (int ch = 1; ch <= 3; ch++) {
+    cachedReadings[ch - 1] = ina.read(ch);
+  }
+}
 
 // ---------- Factory reset (фізична кнопка BOOT, потребує доступу до плати) ----------
 void checkFactoryReset() {
@@ -198,7 +213,7 @@ void setupRoutes() {
     JsonArray channels = doc["channels"].to<JsonArray>();
 
     for (int ch = 1; ch <= 3; ch++) {
-      Reading r = ina.read(ch);
+      Reading r = cachedReadings[ch - 1];
       JsonObject c = channels.add<JsonObject>();
       c["label"] = CH_CAL[ch - 1].label;
       c["bus_V"] = serialized(String(r.busVoltage_V, 3));
@@ -232,9 +247,13 @@ void setup() {
 
   setupRoutes();
   server.begin();
+
+  sampleReadings();     // перше заповнення кешу, щоб не віддавати нулі до першого тіку loop()
+  nutServerBegin();
 }
 
 void loop() {
   ElegantOTA.loop();
   checkWiFiConnection();
+  sampleReadings();
 }

@@ -1,6 +1,6 @@
 #pragma once
 // визначаємо версію
-#define FW_VERSION "0.0.8"
+#define FW_VERSION "0.0.3"
 // ---------- I2C / INA3221 ----------
 #define I2C_SDA 8
 #define I2C_SCL 9
@@ -21,6 +21,24 @@ static const ChannelCal CH_CAL[3] = {
 
 // Current below this magnitude (mA) is treated as 0 (noise floor / deadband)
 #define CURRENT_DEADBAND_MA 50.0f
+
+// Як часто оновлювати кеш показань INA3221 (мс) - і HTTP, і NUT читають
+// лише з цього кешу, щоб не смикати I2C одночасно з різних контекстів.
+#define SAMPLE_INTERVAL_MS 1000
+
+// ---------- NUT (Network UPS Tools) сервер ----------
+#define NUT_PORT 3493
+#define NUT_UPS_NAME "esp32ups"   // саме цю назву виберете в QNAP при налаштуванні
+#define NUT_UPS_DESC "DIY ESP32-S3 UPS Monitor"
+#define NUT_USER "monuser"
+#define NUT_PASS "change-me"      // CHANGE before deploying
+
+// ---------- Характеристики UPS (для ups.status / ups.load / battery.charge) ----------
+#define UPS_RATED_POWER_W  100.0f
+#define BATTERY_EMPTY_V    10.0f   // ~2,5В/елемент - поріг відключення BMS
+#define BATTERY_LOW_V      11.6f   // поріг "low battery" (LB), ~2,9В/елемент
+#define BATTERY_FULL_V     14.6f   // ~3,65В/елемент - повний заряд
+#define INPUT_PRESENT_V    8.0f    // вище цього значення вважаємо, що PSU/мережа є
 
 // ---------- WiFi ----------
 #define WIFI_ATTEMPT_TIMEOUT_MS 10000       // how long to wait for a single connect attempt
