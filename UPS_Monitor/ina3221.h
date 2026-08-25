@@ -10,8 +10,9 @@
 // CH2 = REG_CH1_x + 2, CH3 = REG_CH1_x + 4
 #define REG_MASK_ENABLE 0x0F
 
-// Config: CH1-3 enabled, AVG=64, VBUS CT=8.244ms, VSH CT=8.244ms, continuous shunt+bus
-// (higher averaging than default to smooth the offset jitter we saw at idle)
+// Config: CH1-3 enabled, AVG=64, VBUS CT=1.1ms, VSH CT=1.1ms, continuous shunt+bus
+// (higher averaging than default to smooth the offset jitter we saw at idle;
+// full cycle ≈ 64 * (1.1+1.1)ms * 3ch ≈ 420ms, well under the 1s poll interval)
 #define INA3221_CONFIG  0x7727
 
 struct Reading {

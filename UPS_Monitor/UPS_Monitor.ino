@@ -5,6 +5,7 @@
 // щоб уникнути конфлікту HTTP-методів
 #define ELEGANTOTA_USE_ASYNC_WEBSERVER 1
 #include <ElegantOTA.h>
+#include <ArduinoJson.h>   // Tools -> Manage Libraries -> "ArduinoJson" (Benoit Blanchon)
 #include "config.h"
 #include "ina3221.h"
 #include "web_pages.h"
@@ -14,7 +15,58 @@ AsyncWebServer server(80);
 INA3221 ina;
 
 bool apMode = false;
+String authPass;                 // поточний пароль доступу (RAM-кеш значення з Preferences)
+uint32_t lastWifiCheckMs = 0;
 
+// ---------- Factory reset (фізична кнопка BOOT, потребує доступу до плати) ----------
+void checkFactoryReset() {
+  pinMode(FACTORY_RESET_PIN, INPUT_PULLUP);
+  if (digitalRead(FACTORY_RESET_PIN) != LOW) return; // кнопка не затиснута при старті
+
+  Serial.println("BOOT затиснуто при старті - тримайте для скидання налаштувань...");
+  uint32_t pressStart = millis();
+  while (digitalRead(FACTORY_RESET_PIN) == LOW) {
+    if (millis() - pressStart >= FACTORY_RESET_HOLD_MS) {
+      Serial.println("Скидаю WiFi та пароль доступу до заводських значень...");
+      prefs.begin("wifi", false); prefs.clear(); prefs.end();
+      prefs.begin("auth", false); prefs.clear(); prefs.end();
+      Serial.println("Готово. Перезавантаження...");
+      delay(300);
+      ESP.restart();
+    }
+    delay(50);
+  }
+  Serial.println("Кнопку відпущено зарано - скидання скасовано.");
+}
+
+// ---------- Auth ----------
+void loadAuthPass() {
+  prefs.begin("auth", true);
+  authPass = prefs.getString("pass", AUTH_DEFAULT_PASS);
+  prefs.end();
+}
+
+void saveAuthPass(const String &newPass) {
+  prefs.begin("auth", false);
+  prefs.putString("pass", newPass);
+  prefs.end();
+  authPass = newPass;
+}
+
+// Повертає true, якщо запит авторизований. Якщо ні - сама надсилає 401 і
+// повертає false, виклик у роуті має одразу зробити return.
+//
+// ВАЖЛИВО: без явного AUTH_BASIC тут бібліотека за замовчуванням шле
+// Digest-виклик, на який деякі браузери (Firefox) не показують штатне вікно
+// логіну і замість цього виводять "Looks like there's a problem with this
+// site" - тому метод вказуємо явно.
+bool requireAuth(AsyncWebServerRequest *request) {
+  if (request->authenticate(AUTH_USER, authPass.c_str())) return true;
+  request->requestAuthentication(AsyncAuthType::AUTH_BASIC, "UPS Monitor");
+  return false;
+}
+
+// ---------- WiFi ----------
 void startAPMode() {
   apMode = true;
   WiFi.mode(WIFI_AP);
@@ -66,16 +118,34 @@ bool connectWiFi() {
   return false;
 }
 
+// Ненав'язлива перевірка з loop(): якщо ми в STA-режимі і з'єднання впало,
+// пробуємо перепідключитись без блокування (WiFi.reconnect() використовує
+// востаннє задані credentials і повертає керування одразу).
+void checkWiFiConnection() {
+  if (apMode) return;
+  if (millis() - lastWifiCheckMs < WIFI_CHECK_INTERVAL_MS) return;
+  lastWifiCheckMs = millis();
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("WiFi: з'єднання втрачено, пробую перепідключитись...");
+    WiFi.reconnect();
+  }
+}
+
 void setupRoutes() {
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     request->send_P(200, "text/html", apMode ? WIFI_HTML : INDEX_HTML);
   });
 
+  // Форма теж захищена паролем - на ній немає даних для показу, лише зміна налаштувань.
   server.on("/wifi", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!requireAuth(request)) return;
     request->send_P(200, "text/html", WIFI_HTML);
   });
 
   server.on("/wifi/save", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireAuth(request)) return;
+
     String ssid, pass;
     if (request->hasParam("ssid", true)) ssid = request->getParam("ssid", true)->value();
     if (request->hasParam("pass", true)) pass = request->getParam("pass", true)->value();
@@ -90,24 +160,54 @@ void setupRoutes() {
     ESP.restart();
   });
 
+  // Зміна пароля доступу до налаштувань (той самий пароль, що й для OTA).
+  server.on("/api/set-password", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireAuth(request)) return;
+
+    if (!request->hasParam("newpass", true)) {
+      request->send(400, "text/plain", "Відсутній параметр newpass");
+      return;
+    }
+    String newPass = request->getParam("newpass", true)->value();
+    if (newPass.length() < 8) {
+      request->send(400, "text/plain", "Пароль має бути не коротшим за 8 символів");
+      return;
+    }
+
+    saveAuthPass(newPass);
+    // ElegantOTA перевіряє пароль, з яким був ініціалізований при begin() -
+    // перезавантажуємось, щоб він підхопив новий пароль так само, як WiFi.
+    request->send(200, "text/plain", "Пароль збережено. Перезавантаження...");
+    delay(500);
+    ESP.restart();
+  });
+
   // Ендпоінт для ручного перезавантаження з UI
   server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request){
+    if (!requireAuth(request)) return;
+
     request->send(200, "text/plain", "Перезавантаження...");
     delay(1500); // Даємо час на відправку пакета перед рестартом
     ESP.restart();
   });
 
+  // Телеметрія - навмисно БЕЗ пароля, це лише читання стану батареї/струму/напруги.
   server.on("/api/data", HTTP_GET, [](AsyncWebServerRequest *request){
-    String json = "{\"version\":\"" + String(FW_VERSION) + "\",\"channels\":[";
+    JsonDocument doc;
+    doc["version"] = FW_VERSION;
+    JsonArray channels = doc["channels"].to<JsonArray>();
+
     for (int ch = 1; ch <= 3; ch++) {
       Reading r = ina.read(ch);
-      json += "{\"label\":\"" + String(CH_CAL[ch-1].label) + "\",";
-      json += "\"bus_V\":" + String(r.busVoltage_V, 3) + ",";
-      json += "\"shunt_mV\":" + String(r.shuntVoltage_mV, 3) + ",";
-      json += "\"current_mA\":" + String(r.current_mA, 1) + "}";
-      if (ch < 3) json += ",";
+      JsonObject c = channels.add<JsonObject>();
+      c["label"] = CH_CAL[ch - 1].label;
+      c["bus_V"] = serialized(String(r.busVoltage_V, 3));
+      c["shunt_mV"] = serialized(String(r.shuntVoltage_mV, 3));
+      c["current_mA"] = serialized(String(r.current_mA, 1));
     }
-    json += "]}";
+
+    String json;
+    serializeJson(doc, json);
     request->send(200, "application/json", json);
   });
 }
@@ -115,6 +215,9 @@ void setupRoutes() {
 void setup() {
   Serial.begin(115200);
   delay(300);
+
+  checkFactoryReset();
+  loadAuthPass();
 
   bool inaOk = ina.begin();
   Serial.println(inaOk ? "INA3221 OK" : "INA3221 НЕ ВІДПОВІДАЄ — перевір I2C підключення");
@@ -124,12 +227,13 @@ void setup() {
     startAPMode();
   }
 
-  ElegantOTA.begin(&server, OTA_USER, OTA_PASS);
-  
+  ElegantOTA.begin(&server, AUTH_USER, authPass.c_str());
+
   setupRoutes();
   server.begin();
 }
 
 void loop() {
   ElegantOTA.loop();
+  checkWiFiConnection();
 }

@@ -32,7 +32,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   <tr><th>Канал</th><th>Напруга</th><th>Струм</th></tr>
 </table>
 <footer>
-  <div>Оновлено: <span id="ts">-</span> &nbsp;|&nbsp; <a href="/update">OTA оновлення</a> &nbsp;|&nbsp; <a href="/wifi">WiFi</a></div>
+  <div>Оновлено: <span id="ts">-</span> &nbsp;|&nbsp; <a href="/update">OTA оновлення</a> &nbsp;|&nbsp; <a href="/wifi">WiFi та пароль</a></div>
   <button class="btn-restart" onclick="rebootDevice()">Перезавантажити</button>
 </footer>
 <script>
@@ -78,7 +78,7 @@ const char WIFI_HTML[] PROGMEM = R"HTML(
 <title>WiFi Setup</title>
 <style>
   body { font-family: -apple-system, sans-serif; background:#111; color:#eee; padding:20px; max-width: 400px; margin: auto; }
-  input { width:100%; padding:8px; margin:6px 0 16px 0; box-sizing:border-box; background:#222; border:1px solid #44, color:#eee; color:#fff; border-radius: 4px; }
+  input { width:100%; padding:8px; margin:6px 0 16px 0; box-sizing:border-box; background:#222; border:1px solid #444; color:#fff; border-radius: 4px; }
   label { color: #aaa; font-size: 0.9rem; }
   button { background: #7aa2f7; color: #111; border: none; padding:10px 16px; margin-top:10px; width: 100%; font-weight: bold; border-radius: 4px; cursor: pointer; }
   button:hover { background: #89b4fa; }
@@ -94,6 +94,18 @@ const char WIFI_HTML[] PROGMEM = R"HTML(
   <input name="pass" type="password">
   <button type="submit">Зберегти й перезавантажити</button>
 </form>
+
+<h1 style="margin-top:32px;">Пароль доступу</h1>
+<p style="color:#888; font-size:0.85rem;">
+  Той самий пароль (логін завжди <b>admin</b>) використовується і для цієї сторінки,
+  і для OTA-оновлень. Мінімум 8 символів.
+</p>
+<form method="POST" action="/api/set-password" onsubmit="return confirm('Зберегти новий пароль і перезавантажити пристрій?');">
+  <label>Новий пароль</label>
+  <input name="newpass" type="password" minlength="8" required>
+  <button type="submit">Змінити пароль</button>
+</form>
+
 <a class="back" href="/">← На головну</a>
 </body>
 </html>
