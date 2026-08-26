@@ -24,7 +24,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   .pos { color: #6bcb77; }
   .level { white-space: nowrap; }
   .bar { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 8px; }
-  .seg { width: 10px; height: 14px; border-radius: 2px; background: #333; }
+  .seg { width: 5px; height: 14px; border-radius: 1px; background: #333; }
   .bar-pct { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: #ccc; }
   footer { margin-top: 20px; font-size: 0.8rem; color: #666; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
   a { color: #7aa2f7; text-decoration: none; }
@@ -43,7 +43,6 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     <span class="lang-switch">
       <a href="#" id="lang-uk" onclick="setLang('uk');return false;">UA</a>/<a href="#" id="lang-en" onclick="setLang('en');return false;">EN</a>
     </span>
-    <span style="font-size: 0.8rem; color: #777;" id="fw">v-</span>
   </span>
 </h1>
 <table id="t">
@@ -51,6 +50,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 </table>
 <footer>
   <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
+  <div style="font-size: 0.8rem; color: #777; margin-top: 4px;" id="fw">v-</div>
   <button class="btn-restart" onclick="rebootDevice()" data-i18n="reboot_btn">Перезавантажити</button>
 </footer>
 <script>
@@ -108,9 +108,9 @@ function levelColor(percent, isLoad) {
 
 function renderLevelBar(percent, isLoad) {
   const color = levelColor(percent, isLoad);
-  const lit = Math.max(0, Math.min(5, Math.round(percent / 20)));
+  const lit = Math.max(0, Math.min(10, Math.round(percent / 10)));
   let segs = '';
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 10; i++) {
     segs += `<span class="seg" style="background:${i < lit ? color : '#333'}"></span>`;
   }
   return `<span class="bar">${segs}</span><span class="bar-pct">${percent}%</span>`;
