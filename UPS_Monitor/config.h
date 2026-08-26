@@ -1,6 +1,6 @@
 #pragma once
 // визначаємо версію
-#define FW_VERSION "0.0.15"
+#define FW_VERSION "0.1.2"
 // ---------- I2C / INA3221 ----------
 #define I2C_SDA 8
 #define I2C_SCL 9
@@ -36,10 +36,25 @@ static const ChannelCal CH_CAL[3] = {
 
 // ---------- NUT (Network UPS Tools) сервер ----------
 #define NUT_PORT 3493
-#define NUT_UPS_NAME "esp32ups"   // саме цю назву виберете в QNAP при налаштуванні
+#define NUT_UPS_NAME "esp32ups"   // саме цю назву виберете в NUT-клієнтах при налаштуванні
 #define NUT_UPS_DESC "DIY ESP32-S3 UPS Monitor"
 #define NUT_USER "monuser"
 #define NUT_PASS "change-me"      // CHANGE before deploying
+
+// ---------- Другий ("дзеркальний") NUT-пристрій — сумісність з QNAP QTS ----------
+// QNAP QTS у режимі "Network UPS slave" використовує жорстко вшиті
+// (не редаговані в GUI) параметри підключення: LOGIN qnapups /
+// USERNAME admin / PASSWORD 123456. Підлаштовувати під них основний
+// пристрій (вище) небажано - це б означало розкрити "справжній" логін/
+// пароль назовні. Замість цього сервер віддає ті самі показання під
+// другим, окремим іменем UPS з очікуваними QNAP кредами - і, на відміну
+// від основного пристрою, ДІЙСНО вимагає успішний LOGIN (див. nut_server.h,
+// requireAuth = true) перед видачею даних - тобто це суто read-only канал
+// з реальною автентифікацією, а не запасний вхід в обхід пароля.
+#define NUT_UPS_NAME_QNAP "qnapups"
+#define NUT_UPS_DESC_QNAP "DIY ESP32-S3 UPS Monitor (QNAP compat)"
+#define NUT_USER_QNAP "admin"
+#define NUT_PASS_QNAP "123456"
 
 // ---------- Характеристики UPS (для ups.status / ups.load) ----------
 #define UPS_RATED_POWER_W  100.0f

@@ -243,11 +243,55 @@ const int NUT_VAR_COUNT = sizeof(NUT_VAR_NAMES) / sizeof(NUT_VAR_NAMES[0]);
 
 // ---------- Контекст клієнта та сам сервер ----------
 
+// ---------- Реєстр UPS-пристроїв, які віддає цей сервер ----------
+// Обидва "пристрої" - це одні й ті самі фізичні показання (cachedReadings),
+// просто під різними іменами/кредами: перший - основний (як було раніше,
+// без примусової автентифікації - щоб не зламати вже налаштовані клієнти),
+// другий - спеціально під жорстко вшиті значення QNAP QTS, і ДІЙСНО вимагає
+// вдалого LOGIN (requireAuth = true), тобто це не обхід пароля, а окремий
+// read-only "гостьовий" вхід під очікувані QNAP username/password.
+struct UpsEntry {
+  const char* name;
+  const char* desc;
+  const char* user;
+  const char* pass;
+  bool requireAuth;
+};
+
+static const UpsEntry UPS_ENTRIES[] = {
+  { NUT_UPS_NAME,      NUT_UPS_DESC,      NUT_USER,      NUT_PASS,      false },
+  { NUT_UPS_NAME_QNAP, NUT_UPS_DESC_QNAP, NUT_USER_QNAP, NUT_PASS_QNAP, true  },
+};
+static const int UPS_COUNT = sizeof(UPS_ENTRIES) / sizeof(UPS_ENTRIES[0]);
+
+int findUpsEntry(const String& name) {
+  for (int i = 0; i < UPS_COUNT; i++) {
+    if (name == UPS_ENTRIES[i].name) return i;
+  }
+  return -1;
+}
+
 struct NutClientCtx {
   String buffer;     // накопичення байтів до символу переносу рядка
-  String username;   // збережене значення з USERNAME (для довідки, не критично)
-  bool loggedIn = false;
+  String username;   // збережене значення з USERNAME
+  String password;   // збережене значення з PASSWORD
+  bool loggedIn[UPS_COUNT] = {}; // чи пройшла ЯВНА команда LOGIN для цього UPS (лише для NUMLOGINS/довідки)
 };
+
+// Чи має право це з'єднання читати дані вказаного UPS.
+// НЕ покладається лише на явний виклик LOGIN: багато NUT-клієнтів
+// (зокрема QNAP QTS) для простого читання даних шлють тільки
+// USERNAME + PASSWORD і одразу LIST VAR / GET VAR, без окремого LOGIN
+// <upsname>. Якщо гейтити доступ виключно прапорцем "LOGIN був
+// викликаний", такі клієнти отримають ERR ACCESS-DENIED навіть з
+// правильним паролем. Тож тут звіряємо збережені username/password
+// напряму з очікуваними для цього запису - незалежно від того, чи був
+// окремий LOGIN.
+bool isAuthorized(NutClientCtx* ctx, int idx) {
+  const UpsEntry& e = UPS_ENTRIES[idx];
+  if (!e.requireAuth) return true;
+  return ctx->username == e.user && ctx->password == e.pass;
+}
 
 AsyncServer nutServer(NUT_PORT);
 
@@ -270,23 +314,26 @@ void handleNutLine(AsyncClient* client, NutClientCtx* ctx, String line) {
   cmd.toUpperCase();
 
   if (cmd == "USERNAME") {
+    // Ім'я UPS, до якого стосуються USERNAME/PASSWORD, стає відомим лише
+    // на кроці LOGIN - тож тут просто запам'ятовуємо значення, а звіряємо
+    // їх із потрібною парою креденшлів (яка залежить від UPS_ENTRIES[i])
+    // саме в обробнику LOGIN нижче.
     ctx->username = rest;
     nutSend(client, "OK");
     return;
   }
 
   if (cmd == "PASSWORD") {
-    if (rest == NUT_PASS) {
-      ctx->loggedIn = true;
-      nutSend(client, "OK");
-    } else {
-      nutSend(client, "ERR ACCESS-DENIED");
-    }
+    ctx->password = rest;
+    nutSend(client, "OK");
     return;
   }
 
   if (cmd == "LOGIN") {
-    if (rest != NUT_UPS_NAME) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    int idx = findUpsEntry(rest);
+    if (idx < 0) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    if (!isAuthorized(ctx, idx)) { nutSend(client, "ERR ACCESS-DENIED"); return; }
+    ctx->loggedIn[idx] = true; // лише для довідки (напр. NUMLOGINS) - доступ гейтиться isAuthorized()
     nutSend(client, "OK");
     return;
   }
@@ -298,7 +345,9 @@ void handleNutLine(AsyncClient* client, NutClientCtx* ctx, String line) {
   }
 
   if (cmd == "PRIMARY" || cmd == "MASTER") { // MASTER - стара назва цієї ж команди в NUT
-    if (rest != NUT_UPS_NAME) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    int idx = findUpsEntry(rest);
+    if (idx < 0) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    if (!isAuthorized(ctx, idx)) { nutSend(client, "ERR ACCESS-DENIED"); return; }
     nutSend(client, "OK");
     return;
   }
@@ -327,14 +376,21 @@ void handleNutLine(AsyncClient* client, NutClientCtx* ctx, String line) {
 
     if (sub == "UPS") {
       nutSend(client, "BEGIN LIST UPS");
-      nutSend(client, String("UPS ") + NUT_UPS_NAME + " \"" + NUT_UPS_DESC + "\"");
+      for (int i = 0; i < UPS_COUNT; i++) {
+        nutSend(client, String("UPS ") + UPS_ENTRIES[i].name + " \"" + UPS_ENTRIES[i].desc + "\"");
+      }
       nutSend(client, "END LIST UPS");
       return;
     }
 
     // Усі інші LIST-підкоманди вимагають ім'я UPS як аргумент
     String upsname = arg;
-    if (upsname != NUT_UPS_NAME) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    int upsIdx = findUpsEntry(upsname);
+    if (upsIdx < 0) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    if (!isAuthorized(ctx, upsIdx)) {
+      nutSend(client, "ERR ACCESS-DENIED");
+      return;
+    }
 
     if (sub == "VAR") {
       nutSend(client, String("BEGIN LIST VAR ") + upsname);
@@ -380,10 +436,15 @@ void handleNutLine(AsyncClient* client, NutClientCtx* ctx, String line) {
     String upsname = (sp3 == -1) ? tail : tail.substring(0, sp3);
     String varname = (sp3 == -1) ? ""   : tail.substring(sp3 + 1);
 
-    if (upsname != NUT_UPS_NAME) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    int upsIdx = findUpsEntry(upsname);
+    if (upsIdx < 0) { nutSend(client, "ERR UNKNOWN-UPS"); return; }
+    if (!isAuthorized(ctx, upsIdx)) {
+      nutSend(client, "ERR ACCESS-DENIED");
+      return;
+    }
 
     if (sub == "UPSDESC") {
-      nutSend(client, String("UPSDESC ") + upsname + " \"" + NUT_UPS_DESC + "\"");
+      nutSend(client, String("UPSDESC ") + upsname + " \"" + UPS_ENTRIES[upsIdx].desc + "\"");
       return;
     }
 
