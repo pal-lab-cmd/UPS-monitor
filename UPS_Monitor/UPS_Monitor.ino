@@ -389,6 +389,12 @@ void setupRoutes() {
     request->send(200, "text/plain; charset=utf-8", historyDebugText());
   });
 
+  // Сторінка графіків - навмисно БЕЗ пароля, так само як /api/history, що
+  // вона й показує (лише читання історичної телеметрії).
+  server.on("/history", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", HISTORY_CHART_HTML);
+  });
+
   // Ендпоінт для ручного перезавантаження з UI
   server.on("/api/reboot", HTTP_POST, [](AsyncWebServerRequest *request){
     if (!requireAuthUnlessSetup(request)) return;

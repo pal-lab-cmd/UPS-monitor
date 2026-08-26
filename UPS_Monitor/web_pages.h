@@ -34,6 +34,8 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   .lang-switch { font-size: 0.75rem; color: #777; }
   .lang-switch a { color: #777; padding: 2px 4px; }
   .lang-switch a.active { color: #7aa2f7; font-weight: bold; }
+  .nav-btn { display: inline-block; margin-top: 10px; padding: 8px 14px; background:#1c1c1c; border:1px solid #333; border-radius: 6px; color: #eee; font-size: 0.9rem; }
+  .nav-btn:hover { border-color: #7aa2f7; text-decoration: none; }
 </style>
 </head>
 <body>
@@ -45,12 +47,13 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
     </span>
   </span>
 </h1>
+<a href="/history" class="nav-btn">📈 <span data-i18n="history_link">Графіки</span></a>
 <table id="t">
   <tr><th data-i18n="th_channel">Канал</th><th data-i18n="th_level">Рівень</th><th data-i18n="th_voltage">Напруга</th><th data-i18n="th_current">Струм</th><th data-i18n="th_power">Потужність</th></tr>
 </table>
 <footer>
   <div>
-    <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
+    <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/history" data-i18n="history_link">Графіки</a> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
     <div style="font-size: 0.8rem; color: #777; margin-top: 4px;" id="fw">v-</div>
   </div>
   <button class="btn-restart" onclick="rebootDevice()" data-i18n="reboot_btn">Перезавантажити</button>
@@ -59,7 +62,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 const I18N = {
   uk: {
     th_channel: "Канал", th_level: "Рівень", th_voltage: "Напруга", th_current: "Струм", th_power: "Потужність",
-    updated_label: "Оновлено:", settings_link: "Налаштування", ota_link: "OTA оновлення",
+    updated_label: "Оновлено:", settings_link: "Налаштування", ota_link: "OTA оновлення", history_link: "Графіки",
     reboot_btn: "Перезавантажити",
     reboot_confirm: "Ви дійсно хочете перезавантажити пристрій?",
     reboot_alert: "Пристрій перезавантажується. Сторінка оновиться за кілька секунд...",
@@ -68,7 +71,7 @@ const I18N = {
   },
   en: {
     th_channel: "Channel", th_level: "Level", th_voltage: "Voltage", th_current: "Current", th_power: "Power",
-    updated_label: "Updated:", settings_link: "Settings", ota_link: "OTA update",
+    updated_label: "Updated:", settings_link: "Settings", ota_link: "OTA update", history_link: "Charts",
     reboot_btn: "Reboot",
     reboot_confirm: "Are you sure you want to reboot the device?",
     reboot_alert: "Device is rebooting. The page will refresh in a few seconds...",
@@ -594,7 +597,8 @@ const char HISTORY_HTML[] PROGMEM = R"HTML(
   <span data-i18n="hist_title">Зберігання історії</span>
   )HTML" LANG_SWITCH_HTML R"HTML(
 </h1>
-<p class="hint" data-i18n="hist_note">Функціонал історії та графіків буде додано пізніше. Це налаштування вже зберігається, щоб не питати повторно.</p>
+<p class="hint" data-i18n="hist_note">Самі графіки — на окремій сторінці.</p>
+<p style="margin-top:-8px;"><a href="/history" data-i18n="hist_view_link">→ Переглянути графіки</a></p>
 <form method="POST" action="/settings/history/save" id="histForm">
   <label data-i18n="label_retention">Термін зберігання</label>
   <select name="days" id="days">
@@ -611,7 +615,8 @@ const char HISTORY_HTML[] PROGMEM = R"HTML(
 const I18N = {
   uk: {
     hist_title: "Зберігання історії",
-    hist_note: "Функціонал історії та графіків буде додано пізніше. Це налаштування вже зберігається, щоб не питати повторно.",
+    hist_note: "Самі графіки — на окремій сторінці.",
+    hist_view_link: "→ Переглянути графіки",
     label_retention: "Термін зберігання",
     opt_1m: "1 місяць", opt_3m: "3 місяці", opt_6m: "6 місяців", opt_1y: "1 рік",
     saved_msg: "Збережено", btn_save: "Зберегти",
@@ -619,7 +624,8 @@ const I18N = {
   },
   en: {
     hist_title: "History retention",
-    hist_note: "History and graphs are not implemented yet. This setting is already saved so you won't need to set it again later.",
+    hist_note: "Graphs live on a separate page.",
+    hist_view_link: "→ View graphs",
     label_retention: "Retention period",
     opt_1m: "1 month", opt_3m: "3 months", opt_6m: "6 months", opt_1y: "1 year",
     saved_msg: "Saved", btn_save: "Save",
@@ -645,6 +651,237 @@ document.getElementById('histForm').addEventListener('submit', async function(e)
 
 applyLang();
 loadCurrent();
+</script>
+</body>
+</html>
+)HTML";
+
+// ---------------------------------------------------------------------------
+// Графіки історії - canvas, без зовнішніх бібліотек (узгоджено з рештою
+// проєкту: усі сторінки самодостатні, без CDN-залежностей).
+// ---------------------------------------------------------------------------
+const char HISTORY_CHART_HTML[] PROGMEM = R"HTML(
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>History</title>
+<style>
+  body { font-family: -apple-system, sans-serif; background:#111; color:#eee; margin:0; padding:12px 16px; }
+  h1 { font-size: 1.2rem; display: flex; justify-content: space-between; align-items: center; margin: 4px 0; }
+  a { color: #7aa2f7; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .lang-switch { font-size: 0.75rem; color: #777; }
+  .lang-switch a { color: #777; padding: 2px 4px; }
+  .lang-switch a.active { color: #7aa2f7; font-weight: bold; }
+  .toolbar { display: flex; align-items: center; gap: 10px; margin: 8px 0 4px 0; flex-wrap: wrap; }
+  select { background:#222; border:1px solid #444; color:#fff; border-radius: 4px; padding: 6px 10px; }
+  .meta { color: #777; font-size: 0.8rem; }
+  .chart-card { background:#1a1a1a; border:1px solid #2a2a2a; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
+  .chart-title { font-size: 0.85rem; color: #ccc; margin-bottom: 4px; }
+  canvas { width: 100%; height: 22vh; min-height: 110px; max-height: 190px; display: block; }
+  .back { margin-top: 12px; display: inline-block; }
+</style>
+</head>
+<body>
+<h1>
+  <span data-i18n="title">Графіки</span>
+  )HTML" LANG_SWITCH_HTML R"HTML(
+</h1>
+<div class="toolbar">
+  <label data-i18n="range_label" style="color:#aaa; font-size:0.9rem;">Період:</label>
+  <select id="rangeSel">
+    <option value="1" data-i18n="opt_1h">1 година</option>
+    <option value="6" data-i18n="opt_6h">6 годин</option>
+    <option value="24" selected data-i18n="opt_24h">24 години</option>
+    <option value="168" data-i18n="opt_7d">7 днів</option>
+    <option value="720" data-i18n="opt_30d">30 днів</option>
+    <option value="2160" data-i18n="opt_90d">90 днів</option>
+  </select>
+  <span class="meta" id="meta"></span>
+</div>
+
+<div class="chart-card">
+  <div class="chart-title" data-i18n="chart_ups_power">Потужність UPS out (споживання)</div>
+  <canvas id="chartUpsPower"></canvas>
+</div>
+<div class="chart-card">
+  <div class="chart-title" data-i18n="chart_batt_power">Потужність батареї (+ заряд / - розряд)</div>
+  <canvas id="chartBattPower"></canvas>
+</div>
+<div class="chart-card">
+  <div class="chart-title" data-i18n="chart_soc">Заряд батареї (SOC)</div>
+  <canvas id="chartSoc"></canvas>
+</div>
+
+<a class="back" href="/" data-i18n="back_link">← На головну</a>
+<script>
+const I18N = {
+  uk: {
+    title: "Графіки", range_label: "Період:",
+    opt_1h: "1 година", opt_6h: "6 годин", opt_24h: "24 години", opt_7d: "7 днів", opt_30d: "30 днів", opt_90d: "90 днів",
+    chart_ups_power: "Потужність UPS out (споживання)",
+    chart_batt_power: "Потужність батареї (+ заряд / - розряд)",
+    chart_soc: "Заряд батареї (SOC)",
+    resolution_label: "роздільність:", unit_sec: "с", unit_min: "хв", unit_hour: "год",
+    no_data: "Немає даних за цей період",
+    back_link: "← На головну"
+  },
+  en: {
+    title: "Charts", range_label: "Period:",
+    opt_1h: "1 hour", opt_6h: "6 hours", opt_24h: "24 hours", opt_7d: "7 days", opt_30d: "30 days", opt_90d: "90 days",
+    chart_ups_power: "UPS out power (consumption)",
+    chart_batt_power: "Battery power (+ charge / - discharge)",
+    chart_soc: "Battery charge (SOC)",
+    resolution_label: "resolution:", unit_sec: "s", unit_min: "min", unit_hour: "h",
+    no_data: "No data for this period",
+    back_link: "← Back to home"
+  }
+};
+)HTML" LANG_SWITCH_JS R"HTML(
+
+const MONTHS_SHORT = {
+  uk: ['січ', 'лют', 'бер', 'кві', 'тра', 'чер', 'лип', 'сер', 'вер', 'жов', 'лис', 'гру'],
+  en: ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+};
+
+let currentRangeHours = 24;
+let lastPoints = [];
+let lastFrom = 0, lastTo = 0;
+
+function formatAxisTime(date) {
+  if (currentRangeHours <= 48) {
+    return date.toLocaleTimeString(lang === 'uk' ? 'uk-UA' : 'en-US', {hour: '2-digit', minute: '2-digit'});
+  }
+  return `${date.getDate()} ${MONTHS_SHORT[lang][date.getMonth()]}`;
+}
+
+function formatResolution(sec) {
+  if (!sec) return '-';
+  if (sec < 60) return sec + ' ' + t('unit_sec');
+  if (sec < 3600) return Math.round(sec / 60) + ' ' + t('unit_min');
+  const h = sec / 3600;
+  return (Number.isInteger(h) ? h : h.toFixed(1)) + ' ' + t('unit_hour');
+}
+
+// Легкий line-chart на canvas, без бібліотек. Вісь X завжди охоплює весь
+// запитаний період [opts.tMin, opts.tMax] - НЕ лише діапазон точок, що
+// реально є в даних, інакше короткий фрагмент даних розтягувався б на всю
+// ширину і виглядав як увесь обраний період. opts:
+//   tMin, tMax - межі осі X (від сервера: d.from/d.to)
+//   color, decimals - оформлення
+//   includeZero - додати нульову лінію (для знакових величин, напр. потужність батареї)
+//   fixedMin/fixedMax - фіксований діапазон Y замість авто (напр. SOC 0..100)
+function drawChart(canvasId, points, valueFn, opts) {
+  const canvas = document.getElementById(canvasId);
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.clientWidth || 300, cssH = canvas.clientHeight || 200;
+  canvas.width = cssW * dpr;
+  canvas.height = cssH * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  const padL = 40, padR = 8, padT = 8, padB = 22;
+  const w = cssW - padL - padR, h = cssH - padT - padB;
+
+  const tMin = opts.tMin, tMax = opts.tMax;
+  const xOf = (ts) => padL + (tMax > tMin ? (ts - tMin) / (tMax - tMin) : 0) * w;
+
+  const hasData = points && points.length > 0;
+  const values = hasData ? points.map(valueFn) : [];
+  let minV = (opts.fixedMin !== undefined) ? opts.fixedMin : (hasData ? Math.min(...values) : 0);
+  let maxV = (opts.fixedMax !== undefined) ? opts.fixedMax : (hasData ? Math.max(...values) : 1);
+  if (opts.includeZero) { minV = Math.min(minV, 0); maxV = Math.max(maxV, 0); }
+  if (minV === maxV) { minV -= 1; maxV += 1; }
+  if (opts.fixedMin === undefined && opts.fixedMax === undefined && hasData) {
+    const pad = (maxV - minV) * 0.1;
+    minV -= pad; maxV += pad;
+  }
+  const yOf = (v) => padT + h - ((v - minV) / (maxV - minV)) * h;
+
+  ctx.strokeStyle = '#2a2a2a';
+  ctx.fillStyle = '#888';
+  ctx.font = '11px -apple-system, sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= 4; i++) {
+    const v = minV + (maxV - minV) * i / 4;
+    const y = yOf(v);
+    ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + w, y); ctx.stroke();
+    ctx.fillText(v.toFixed(opts.decimals || 0), padL - 6, y + 3);
+  }
+
+  if (opts.includeZero) {
+    ctx.strokeStyle = '#555';
+    const y0 = yOf(0);
+    ctx.beginPath(); ctx.moveTo(padL, y0); ctx.lineTo(padL + w, y0); ctx.stroke();
+  }
+
+  if (hasData) {
+    ctx.strokeStyle = opts.color || '#7aa2f7';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    points.forEach((p, i) => {
+      const x = xOf(p.t), y = yOf(valueFn(p));
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+  }
+
+  // Підписи осі X - рівномірно по ВСЬОМУ запитаному діапазону, а не по
+  // індексах точок (щоб лишались коректними навіть при малій кількості
+  // або відсутності даних).
+  ctx.fillStyle = '#888';
+  const tickCount = 4;
+  for (let i = 0; i <= tickCount; i++) {
+    const ts = tMin + (tMax - tMin) * i / tickCount;
+    const x = xOf(ts);
+    ctx.textAlign = i === 0 ? 'left' : (i === tickCount ? 'right' : 'center');
+    ctx.fillText(formatAxisTime(new Date(ts * 1000)), Math.min(Math.max(x, padL), padL + w), cssH - 6);
+  }
+
+  if (!hasData) {
+    ctx.fillStyle = '#666';
+    ctx.font = '13px -apple-system, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(t('no_data'), padL + w / 2, padT + h / 2);
+  }
+}
+
+function renderAll() {
+  const range = { tMin: lastFrom, tMax: lastTo };
+  drawChart('chartUpsPower', lastPoints, p => p.uP, { ...range, color: '#7aa2f7', decimals: 0 });
+  drawChart('chartBattPower', lastPoints, p => p.bP, { ...range, color: '#f0c040', decimals: 0, includeZero: true });
+  drawChart('chartSoc', lastPoints, p => p.soc, { ...range, color: '#6bcb77', decimals: 0, fixedMin: 0, fixedMax: 100 });
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch(`/api/history?hours=${currentRangeHours}&points=400`);
+    const d = await r.json();
+    lastPoints = d.points || [];
+    lastFrom = d.from;
+    lastTo = d.to;
+    renderAll();
+    document.getElementById('meta').textContent = t('resolution_label') + ' ' + formatResolution(d.resolution_s);
+  } catch (e) { console.error(e); }
+}
+
+document.getElementById('rangeSel').addEventListener('change', function() {
+  currentRangeHours = parseInt(this.value, 10);
+  loadHistory();
+});
+
+let resizeTimer = null;
+window.addEventListener('resize', function() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderAll, 150);
+});
+
+applyLang();
+loadHistory();
+setInterval(loadHistory, 60000);
 </script>
 </body>
 </html>
