@@ -260,7 +260,7 @@ struct UpsEntry {
 
 static const UpsEntry UPS_ENTRIES[] = {
   { NUT_UPS_NAME,      NUT_UPS_DESC,      NUT_USER,      NUT_PASS,      false },
-  { NUT_UPS_NAME_QNAP, NUT_UPS_DESC_QNAP, NUT_USER_QNAP, NUT_PASS_QNAP, true  },
+  { NUT_UPS_NAME_QNAP, NUT_UPS_DESC_QNAP, NUT_USER_QNAP, NUT_PASS_QNAP, false  },
 };
 static const int UPS_COUNT = sizeof(UPS_ENTRIES) / sizeof(UPS_ENTRIES[0]);
 
