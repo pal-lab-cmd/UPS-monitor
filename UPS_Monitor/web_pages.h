@@ -22,6 +22,10 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   .val { font-size: 1.1rem; font-variant-numeric: tabular-nums; }
   .neg { color: #ff6b6b; }
   .pos { color: #6bcb77; }
+  .level { white-space: nowrap; }
+  .bar { display: inline-flex; gap: 2px; vertical-align: middle; margin-right: 8px; }
+  .seg { width: 10px; height: 14px; border-radius: 2px; background: #333; }
+  .bar-pct { font-variant-numeric: tabular-nums; font-size: 0.85rem; color: #ccc; }
   footer { margin-top: 20px; font-size: 0.8rem; color: #666; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
   a { color: #7aa2f7; text-decoration: none; }
   a:hover { text-decoration: underline; }
@@ -43,7 +47,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   </span>
 </h1>
 <table id="t">
-  <tr><th data-i18n="th_channel">Канал</th><th data-i18n="th_voltage">Напруга</th><th data-i18n="th_current">Струм</th><th data-i18n="th_power">Потужність</th></tr>
+  <tr><th data-i18n="th_channel">Канал</th><th data-i18n="th_level">Рівень</th><th data-i18n="th_voltage">Напруга</th><th data-i18n="th_current">Струм</th><th data-i18n="th_power">Потужність</th></tr>
 </table>
 <footer>
   <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
@@ -52,7 +56,7 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
 <script>
 const I18N = {
   uk: {
-    th_channel: "Канал", th_voltage: "Напруга", th_current: "Струм", th_power: "Потужність",
+    th_channel: "Канал", th_level: "Рівень", th_voltage: "Напруга", th_current: "Струм", th_power: "Потужність",
     updated_label: "Оновлено:", settings_link: "Налаштування", ota_link: "OTA оновлення",
     reboot_btn: "Перезавантажити",
     reboot_confirm: "Ви дійсно хочете перезавантажити пристрій?",
@@ -61,7 +65,7 @@ const I18N = {
     unit_v: "В", unit_a: "А", unit_w: "Вт"
   },
   en: {
-    th_channel: "Channel", th_voltage: "Voltage", th_current: "Current", th_power: "Power",
+    th_channel: "Channel", th_level: "Level", th_voltage: "Voltage", th_current: "Current", th_power: "Power",
     updated_label: "Updated:", settings_link: "Settings", ota_link: "OTA update",
     reboot_btn: "Reboot",
     reboot_confirm: "Are you sure you want to reboot the device?",
@@ -88,19 +92,43 @@ function setLang(l) {
   poll();
 }
 
+function levelColor(percent, isLoad) {
+  // Заряд: червоний <20%, жовтий <40%, далі зелений.
+  // Навантаження: логіка навпаки - зелений <40%, жовтий <70%, далі червоний
+  // (низьке навантаження - добре, високе - привід насторожитись).
+  if (isLoad) {
+    if (percent < 40) return '#6bcb77';
+    if (percent < 70) return '#f0c040';
+    return '#ff6b6b';
+  }
+  if (percent < 20) return '#ff6b6b';
+  if (percent < 40) return '#f0c040';
+  return '#6bcb77';
+}
+
+function renderLevelBar(percent, isLoad) {
+  const color = levelColor(percent, isLoad);
+  const lit = Math.max(0, Math.min(5, Math.round(percent / 20)));
+  let segs = '';
+  for (let i = 0; i < 5; i++) {
+    segs += `<span class="seg" style="background:${i < lit ? color : '#333'}"></span>`;
+  }
+  return `<span class="bar">${segs}</span><span class="bar-pct">${percent}%</span>`;
+}
+
 async function poll() {
   try {
     const r = await fetch('/api/data');
     const d = await r.json();
     document.getElementById('fw').textContent = 'v' + d.version;
     const t2 = document.getElementById('t');
-    t2.innerHTML = `<tr><th>${t('th_channel')}</th><th>${t('th_voltage')}</th><th>${t('th_current')}</th><th>${t('th_power')}</th></tr>`;
+    t2.innerHTML = `<tr><th>${t('th_channel')}</th><th>${t('th_level')}</th><th>${t('th_voltage')}</th><th>${t('th_current')}</th><th>${t('th_power')}</th></tr>`;
     d.channels.forEach(c => {
       const cls = c.current_mA < 0 ? 'neg' : 'pos';
-      let label = c.label;
-      if (c.soc_percent !== undefined) label += ` (${c.soc_percent}%)`;
-      if (c.load_percent !== undefined) label += ` (${c.load_percent}%)`;
-      t2.innerHTML += `<tr><td>${label}</td><td class="val">${c.bus_V.toFixed(2)} ${t('unit_v')}</td><td class="val ${cls}">${(c.current_mA/1000).toFixed(3)} ${t('unit_a')}</td><td class="val ${cls}">${(c.power_mW/1000).toFixed(1)} ${t('unit_w')}</td></tr>`;
+      let level = '';
+      if (c.soc_percent !== undefined) level = renderLevelBar(c.soc_percent, false);
+      else if (c.load_percent !== undefined) level = renderLevelBar(c.load_percent, true);
+      t2.innerHTML += `<tr><td>${c.label}</td><td class="level">${level}</td><td class="val">${c.bus_V.toFixed(2)} ${t('unit_v')}</td><td class="val ${cls}">${(c.current_mA/1000).toFixed(3)} ${t('unit_a')}</td><td class="val ${cls}">${(c.power_mW/1000).toFixed(1)} ${t('unit_w')}</td></tr>`;
     });
     document.getElementById('ts').textContent = new Date().toLocaleTimeString();
   } catch (e) { console.error(e); }
