@@ -245,11 +245,13 @@ const int NUT_VAR_COUNT = sizeof(NUT_VAR_NAMES) / sizeof(NUT_VAR_NAMES[0]);
 
 // ---------- Реєстр UPS-пристроїв, які віддає цей сервер ----------
 // Обидва "пристрої" - це одні й ті самі фізичні показання (cachedReadings),
-// просто під різними іменами/кредами: перший - основний (як було раніше,
-// без примусової автентифікації - щоб не зламати вже налаштовані клієнти),
-// другий - спеціально під жорстко вшиті значення QNAP QTS, і ДІЙСНО вимагає
-// вдалого LOGIN (requireAuth = true), тобто це не обхід пароля, а окремий
-// read-only "гостьовий" вхід під очікувані QNAP username/password.
+// просто під різними іменами. requireAuth лишається як загальний механізм
+// (можна увімкнути для esp32ups, якщо колись знадобиться), але для qnapups
+// він примусово false: за фактичним логом обміну (/api/nutlog) реальний
+// QNAP-клієнт ("upsutil") взагалі не шле USERNAME/PASSWORD/LOGIN - лише
+// LIST VAR / GET VAR одразу після CONNECT. requireAuth = true тут зробив
+// би qnapups назавжди недоступним для QNAP, тож окремих QNAP-креденшлів
+// більше немає - user/pass для цього запису просто не використовуються.
 struct UpsEntry {
   const char* name;
   const char* desc;
@@ -259,8 +261,8 @@ struct UpsEntry {
 };
 
 static const UpsEntry UPS_ENTRIES[] = {
-  { NUT_UPS_NAME,      NUT_UPS_DESC,      NUT_USER,      NUT_PASS,      false },
-  { NUT_UPS_NAME_QNAP, NUT_UPS_DESC_QNAP, NUT_USER_QNAP, NUT_PASS_QNAP, false  },
+  { NUT_UPS_NAME,      NUT_UPS_DESC,      NUT_USER, NUT_PASS, false },
+  { NUT_UPS_NAME_QNAP, NUT_UPS_DESC_QNAP, nullptr,  nullptr,  false },
 };
 static const int UPS_COUNT = sizeof(UPS_ENTRIES) / sizeof(UPS_ENTRIES[0]);
 

@@ -42,19 +42,18 @@ static const ChannelCal CH_CAL[3] = {
 #define NUT_PASS "change-me"      // CHANGE before deploying
 
 // ---------- Другий ("дзеркальний") NUT-пристрій — сумісність з QNAP QTS ----------
-// QNAP QTS у режимі "Network UPS slave" використовує жорстко вшиті
-// (не редаговані в GUI) параметри підключення: LOGIN qnapups /
-// USERNAME admin / PASSWORD 123456. Підлаштовувати під них основний
-// пристрій (вище) небажано - це б означало розкрити "справжній" логін/
-// пароль назовні. Замість цього сервер віддає ті самі показання під
-// другим, окремим іменем UPS з очікуваними QNAP кредами - і, на відміну
-// від основного пристрою, ДІЙСНО вимагає успішний LOGIN (див. nut_server.h,
-// requireAuth = true) перед видачею даних - тобто це суто read-only канал
-// з реальною автентифікацією, а не запасний вхід в обхід пароля.
+// QNAP QTS у режимі "Network UPS slave" підключається під жорстко вшитим
+// (не редагованим у GUI) ім'ям "qnapups". За фактом (перевірено через лог
+// обміну в /api/nutlog) реальний QNAP-клієнт - це "upsutil", а не
+// стандартний upsmon: він взагалі не шле USERNAME/PASSWORD/LOGIN, одразу
+// після підключення робить LIST VAR / GET VAR. Тобто окремих креденшлів
+// для нього не існує в природі - раніше тут були NUT_USER_QNAP/
+// NUT_PASS_QNAP "про запас", але оскільки жоден реальний клієнт їх ніколи
+// не надішле (а requireAuth для qnapups вимкнено, див. nut_server.h), вони
+// прибрані як мертвий код. "Read-only" для qnapups тримається не на
+// паролі, а структурно - сервер нижче не реалізує SET/INSTCMD взагалі.
 #define NUT_UPS_NAME_QNAP "qnapups"
 #define NUT_UPS_DESC_QNAP "DIY ESP32-S3 UPS Monitor (QNAP compat)"
-#define NUT_USER_QNAP "admin"
-#define NUT_PASS_QNAP "123456"
 
 // ---------- Характеристики UPS (для ups.status / ups.load) ----------
 #define UPS_RATED_POWER_W  100.0f
