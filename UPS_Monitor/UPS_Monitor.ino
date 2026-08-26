@@ -8,6 +8,7 @@
 #include <ArduinoJson.h>   // Tools -> Manage Libraries -> "ArduinoJson" (Benoit Blanchon)
 #include "config.h"
 #include "ina3221.h"
+#include "history.h"
 #include "web_pages.h"
 #include "nut_server.h"
 
@@ -55,8 +56,9 @@ void setupTime() {
   Serial.printf("NTP: сервер=%s, TZ=%s\n", ntpServer.c_str(), tz.c_str());
 }
 
-// Термін зберігання історії (namespace "hist") - сама історія ще не
-// реалізована, це лише налаштування наперед для майбутньої функції.
+// Термін зберігання історії (namespace "hist") - сама історія реалізована
+// в history.h (FFat ring-buffer'и), тут лише читання/запис вибраного
+// користувачем терміну в Preferences.
 int loadHistoryRetentionDays() {
   prefs.begin("hist", true);
   int days = prefs.getInt("days", HISTORY_RETENTION_DAYS_DEFAULT);
@@ -76,6 +78,7 @@ void forceSample() {
     cachedReadings[ch - 1] = ina.read(ch);
   }
   updateCoulombCounter();
+  historyOnSample(cachedReadings[0], cachedReadings[1], cachedReadings[2], batterySocPercent());
 }
 
 void sampleReadings() {
@@ -336,7 +339,7 @@ void setupRoutes() {
     request->send(200, "application/json", json);
   });
 
-  // ---------- Зберігання історії (лише налаштування, сама історія - пізніше) ----------
+  // ---------- Зберігання історії (налаштування терміну + сама історія, див. history.h) ----------
   server.on("/settings/history", HTTP_GET, [](AsyncWebServerRequest *request){
     if (!requireAuthUnlessSetup(request)) return;
     request->send_P(200, "text/html", HISTORY_HTML);
@@ -351,6 +354,7 @@ void setupRoutes() {
     prefs.begin("hist", false);
     prefs.putInt("days", days);
     prefs.end();
+    historySetRetentionDays(days); // застосовуємо одразу, без перезавантаження
 
     request->send(200, "text/plain", "OK");
   });
@@ -362,6 +366,27 @@ void setupRoutes() {
     String json;
     serializeJson(doc, json);
     request->send(200, "application/json", json);
+  });
+
+  // Дані для графіків - як /api/data, навмисно БЕЗ пароля (лише читання
+  // історичної телеметрії). range/points -> historyQueryJson() у history.h,
+  // де відбувається вибір рівня деталізації та проріджування.
+  server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request){
+    uint32_t rangeSeconds = 24UL * 3600; // за замовчуванням - останні 24 години
+    if (request->hasParam("hours")) rangeSeconds = (uint32_t)request->getParam("hours")->value().toInt() * 3600UL;
+    if (request->hasParam("days"))  rangeSeconds = (uint32_t)request->getParam("days")->value().toInt() * 86400UL;
+
+    uint32_t points = 300;
+    if (request->hasParam("points")) points = (uint32_t)request->getParam("points")->value().toInt();
+
+    request->send(200, "application/json", historyQueryJson(rangeSeconds, points));
+  });
+
+  // Дебаг-ендпоінт (сирі значення без проріджування) - швидко перевірити
+  // стан сховища, окремо від /api/history вище.
+  server.on("/api/history/debug", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!requireAuthUnlessSetup(request)) return;
+    request->send(200, "text/plain; charset=utf-8", historyDebugText());
   });
 
   // Ендпоінт для ручного перезавантаження з UI
@@ -431,6 +456,7 @@ void setup() {
   checkFactoryReset();
   loadAuthPass();
   loadBatterySettings();
+  historyBegin(loadHistoryRetentionDays());
 
   bool inaOk = ina.begin();
   Serial.println(inaOk ? "INA3221 OK" : "INA3221 НЕ ВІДПОВІДАЄ — перевір I2C підключення");
