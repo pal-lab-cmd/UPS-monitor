@@ -46,7 +46,7 @@ public:
 
     const ChannelCal& cal = CH_CAL[channel - 1];
     float correctedShunt_mV = shunt_mV - cal.offset_mV;
-    float current_mA = (correctedShunt_mV / cal.rShunt_mOhm) * 1000.0f;
+    float current_mA = (correctedShunt_mV / cal.rShunt_mOhm) * 1000.0f * cal.currentSign;
 
     if (fabsf(current_mA) < CURRENT_DEADBAND_MA) {
       current_mA = 0.0f;
