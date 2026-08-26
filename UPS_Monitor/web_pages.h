@@ -49,8 +49,10 @@ const char INDEX_HTML[] PROGMEM = R"HTML(
   <tr><th data-i18n="th_channel">Канал</th><th data-i18n="th_level">Рівень</th><th data-i18n="th_voltage">Напруга</th><th data-i18n="th_current">Струм</th><th data-i18n="th_power">Потужність</th></tr>
 </table>
 <footer>
-  <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
-  <div style="font-size: 0.8rem; color: #777; margin-top: 4px;" id="fw">v-</div>
+  <div>
+    <div><span data-i18n="updated_label">Оновлено:</span> <span id="ts">-</span> &nbsp;|&nbsp; <a href="/settings" data-i18n="settings_link">Налаштування</a> &nbsp;|&nbsp; <a href="/update" data-i18n="ota_link">OTA оновлення</a></div>
+    <div style="font-size: 0.8rem; color: #777; margin-top: 4px;" id="fw">v-</div>
+  </div>
   <button class="btn-restart" onclick="rebootDevice()" data-i18n="reboot_btn">Перезавантажити</button>
 </footer>
 <script>
