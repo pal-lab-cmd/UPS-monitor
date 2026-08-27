@@ -8,6 +8,7 @@ DIY monitoring for a self-built UPS based on ESP32-S3 and INA3221. Measures volt
 
 - ESP32-S3 (N16R8 or compatible), I2C on GPIO8 (SDA) / GPIO9 (SCL)
 - INA3221 — 3-channel voltage/current monitor, address `0x40` (A0 → GND)
+- GPIO4 — INA3221 Power-Valid (`PV`) output, hardware deep-sleep wake trigger (external pull-up R21 10K to VS on this board; see the "Sleep" section below)
 - Factory R100 shunts paralleled with hand-soldered R010 (~9 mOhm effective per channel)
 - Channels (labels set in `config.h`, currently): `Battery`, `PSU in`, `UPS out`
 
@@ -40,6 +41,7 @@ Board: `ESP32S3 Dev Module`, PSRAM: `OPI PSRAM`, Flash Size: `16MB`.
 - NUT server (port 3493) for integration with a NAS or other UPS monitoring systems
 - Single access password (username is always `admin`) for the Settings section, reboot and OTA; changeable from the UI
 - Factory reset via the physical BOOT button
+- Deep sleep when idle (`sleep.h`) — sleeps when there's no voltage on either `PSU in` or `UPS out` for `SLEEP_DEBOUNCE_MS`; wakes either via INA3221's Power-Valid hardware signal or a periodic timer fallback — see the "Sleep" section below
 
 ## First boot
 
@@ -106,6 +108,20 @@ A separate sketch, `ina3221_test.ino`, is used to re-calibrate after replacing/r
 Besides resistance and offset, each channel also has a `currentSign` field (`+1`/`-1`) that corrects for shunt wiring polarity, so the current sign always matches physical meaning (for `Battery`: `+` charging / `-` discharging; for `PSU in` and `UPS out` current is always reported non-negative, since both channels are physically one-directional). Verify empirically: connect the PSU with a partially discharged battery and check the sign of `battery.current` — if it's negative while charging, flip the `Battery` channel's `currentSign` to `-1`.
 
 `BATTERY_INTERNAL_RESISTANCE_OHM` (pack internal resistance) affects the accuracy of the voltage IR compensation used for SOC estimation — the starting value is an approximation; refine it empirically by applying a known load and measuring `ΔV/ΔI`.
+
+## Sleep (deep sleep) when there's no power
+
+The board is powered from the battery through a separate DC-DC module, independent of `PSU in`/`UPS out`, so the ESP32 keeps running even when both channels are "dead." That's exactly the condition worth sleeping over to save the battery: the system is deliberately idle (in storage, or with the load disconnected).
+
+- **Sleep condition:** voltage on `PSU in` **and** on `UPS out` both below `SLEEP_VOLTAGE_THRESHOLD_V` (default 2V), continuously for `SLEEP_DEBOUNCE_MS` (2 min — guards against flapping on brief transients)
+- **Two wake sources armed at once:**
+  - **Hardware, fast** — INA3221's Power-Valid pin (`PV`, GPIO4). Important caveat: PV is hardware-`AND`ed across all three channels at once (Upper/Lower-Limit are a single register pair for the whole chip, not per-channel), so it only actually fires when `PSU in` **and** `UPS out` both return at roughly the same time (`Battery` is always above the threshold, since it's what powers the board in the first place)
+  - **Software, fallback** — a periodic timer wake (`SLEEP_TIMER_RECHECK_US`, default 3 min) that implements the real `OR` logic PV can't: if, say, `PSU in` comes back but `UPS out` doesn't yet (user is only trickle-charging, load still off), hardware PV won't fire, and the timer wakes up on its own to notice the change
+- **Fast path, no WiFi:** if the wakeup was the timer fallback and the "no power" condition still holds, the device goes straight back to sleep **without ever bringing up WiFi/the server** (just an I2C check, a fraction of a second at low current) — otherwise every such "just checking" cycle would cost as much battery as a full WiFi connect
+- Before sleeping, the coulomb-counter state is force-saved (`saveCoulombState()`) — deep sleep is equivalent to a full reboot for the chip, RAM isn't preserved except `RTC_DATA_ATTR`; history doesn't need this, since every record is already flushed synchronously in `history.h`
+- Power-Valid thresholds (`SLEEP_PV_UPPER_V`/`SLEEP_PV_LOWER_V`) are written to the INA3221 on every boot (`sleepSetupPowerValid()`) — this requires an external pull-up on the PV line (present on this board: R21, 10K to VS)
+- Each wakeup's cause is logged over Serial (`sleepLogWakeReason()`): normal boot / hardware PV / timer
+- While asleep, the device doesn't respond to HTTP/NUT requests, and there will be a gap in the history for that period (expected — there's nothing to monitor while the system isn't powered)
 
 ## Security
 
