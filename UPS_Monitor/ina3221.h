@@ -9,6 +9,8 @@
 #define REG_CH1_BUS     0x02
 // CH2 = REG_CH1_x + 2, CH3 = REG_CH1_x + 4
 #define REG_MASK_ENABLE 0x0F
+#define REG_PV_UPPER    0x10  // Power-Valid Upper-Limit - те саме кодування, що й bus voltage (8мВ/LSB, біти 15:3)
+#define REG_PV_LOWER    0x11  // Power-Valid Lower-Limit
 
 // Config: CH1-3 enabled, AVG=64, VBUS CT=1.1ms, VSH CT=1.1ms, continuous shunt+bus
 // (higher averaging than default to smooth the offset jitter we saw at idle;
@@ -58,6 +60,17 @@ public:
     r.current_mA = current_mA;
     r.power_mW = bus_V * current_mA; // Вт*мА = мВт (напруга шини, не з врахуванням падіння на шунті)
     return r;
+  }
+
+  // Пороги Power-Valid (для GPIO wake з deep sleep - див. sleep.h). ОДНЕ
+  // спільне значення застосовується до ВСІХ ТРЬОХ каналів одночасно - це
+  // апаратне обмеження INA3221, не per-channel налаштування. Той самий
+  // формат кодування, що й bus voltage (8мВ/LSB).
+  void setPowerValidLimits(float upperV, float lowerV) {
+    uint16_t upperReg = ((uint16_t)(upperV / 0.008f + 0.5f)) << 3;
+    uint16_t lowerReg = ((uint16_t)(lowerV / 0.008f + 0.5f)) << 3;
+    writeReg(REG_PV_UPPER, upperReg);
+    writeReg(REG_PV_LOWER, lowerReg);
   }
 
 private:
