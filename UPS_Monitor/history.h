@@ -107,10 +107,16 @@ public:
   // заповнилось - [_head, capacity) це найстаріші дані, [0, _head) -
   // найновіші, разом рівно один хронологічний прохід.
   //
-  // stride - проріджування: зберігається лише кожен stride-й запис, що
-  // потрапив у діапазон, тож у RAM ніколи не тримаємо більше maxOut
-  // записів одночасно (для рівня "long" це 35040 записів у файлі, але
-  // читаємо блоками по 64, а не все одразу).
+  // stride - даунсемплінг: замість того, щоб просто брати кожен stride-й
+  // запис і викидати решту (просте проріджування спотворює графік -
+  // короткочасні піки струму, що тривають ~1 запис, або повністю губляться,
+  // або випадково потрапляють у вибірку залежно від фази, тому графік
+  // виглядає "рваним" і не відповідає реальній формі сигналу), тут
+  // УСЕРЕДНЮЮТЬСЯ всі записи, що потрапили в кожне stride-вікно, в один
+  // вихідний семпл - так само, як HistAccum усереднює сирі покази при
+  // записі. У RAM все одно ніколи не тримаємо більше maxOut записів
+  // одночасно (для рівня "long" це 35040 записів у файлі, але читаємо
+  // блоками по 64, а не все одразу).
   size_t queryChronological(uint32_t fromTs, uint32_t toTs, uint32_t stride, HistSample* out, size_t maxOut) {
     if (!_file || maxOut == 0) return 0;
     if (stride == 0) stride = 1;
@@ -121,6 +127,26 @@ public:
     uint32_t pos = _head;
     uint32_t remaining = _capacity;
 
+    double sBattV = 0, sBattI = 0, sPsuV = 0, sPsuI = 0, sUpsV = 0, sUpsI = 0, sSoc = 0;
+    uint32_t groupCount = 0;
+    uint32_t lastTs = 0;
+
+    auto flushGroup = [&]() {
+      if (groupCount == 0 || n >= maxOut) return;
+      HistSample s;
+      s.ts       = lastTs; // мітка часу останнього запису у вікні
+      s.battV_cV = (uint16_t)lround(sBattV / groupCount);
+      s.battI_mA = (int16_t)lround(sBattI / groupCount);
+      s.psuV_cV  = (uint16_t)lround(sPsuV / groupCount);
+      s.psuI_mA  = (int16_t)lround(sPsuI / groupCount);
+      s.upsV_cV  = (uint16_t)lround(sUpsV / groupCount);
+      s.upsI_mA  = (int16_t)lround(sUpsI / groupCount);
+      s.socPct   = (uint8_t)lround(sSoc / groupCount);
+      out[n++] = s;
+      sBattV = sBattI = sPsuV = sPsuI = sUpsV = sUpsI = sSoc = 0;
+      groupCount = 0;
+    };
+
     while (remaining > 0 && n < maxOut) {
       uint32_t want = min((uint32_t)64, min(remaining, _capacity - pos));
       _file.seek((uint64_t)pos * sizeof(HistSample));
@@ -129,13 +155,21 @@ public:
 
       for (uint32_t i = 0; i < got; i++) {
         if (buf[i].ts != 0 && buf[i].ts >= fromTs && buf[i].ts <= toTs) {
-          if (matched % stride == 0 && n < maxOut) out[n++] = buf[i];
+          sBattV += buf[i].battV_cV; sBattI += buf[i].battI_mA;
+          sPsuV  += buf[i].psuV_cV;  sPsuI  += buf[i].psuI_mA;
+          sUpsV  += buf[i].upsV_cV;  sUpsI  += buf[i].upsI_mA;
+          sSoc   += buf[i].socPct;
+          lastTs = buf[i].ts;
+          groupCount++;
           matched++;
+          if (matched % stride == 0) flushGroup();
+          if (n >= maxOut) break;
         }
       }
       pos = (pos + got) % _capacity;
       remaining -= got;
     }
+    flushGroup(); // "хвіст" - неповна остання група в кінці діапазону
     return n;
   }
 
