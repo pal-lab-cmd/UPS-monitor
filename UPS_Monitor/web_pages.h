@@ -677,6 +677,8 @@ const char HISTORY_CHART_HTML[] PROGMEM = R"HTML(
   .lang-switch a.active { color: #7aa2f7; font-weight: bold; }
   .toolbar { display: flex; align-items: center; gap: 10px; margin: 8px 0 4px 0; flex-wrap: wrap; }
   select { background:#222; border:1px solid #444; color:#fff; border-radius: 4px; padding: 6px 10px; }
+  input[type="datetime-local"] { background:#222; border:1px solid #444; color:#fff; border-radius: 4px; padding: 5px 8px; font-size: 0.85rem; }
+  #customApply { background: #7aa2f7; color: #111; border: none; padding: 6px 12px; border-radius: 4px; font-weight: bold; cursor: pointer; }
   .meta { color: #777; font-size: 0.8rem; }
   .chart-card { background:#1a1a1a; border:1px solid #2a2a2a; border-radius: 8px; padding: 8px 10px; margin-top: 8px; }
   .chart-title { font-size: 0.85rem; color: #ccc; margin-bottom: 4px; }
@@ -698,7 +700,14 @@ const char HISTORY_CHART_HTML[] PROGMEM = R"HTML(
     <option value="168" data-i18n="opt_7d">7 днів</option>
     <option value="720" data-i18n="opt_30d">30 днів</option>
     <option value="2160" data-i18n="opt_90d">90 днів</option>
+    <option value="custom" data-i18n="opt_custom">Свій період…</option>
   </select>
+  <span id="customRange" style="display:none; align-items:center; gap:6px;">
+    <input type="datetime-local" id="customFrom">
+    <span style="color:#666;">–</span>
+    <input type="datetime-local" id="customTo">
+    <button id="customApply" type="button" data-i18n="btn_apply">Показати</button>
+  </span>
   <span class="meta" id="meta"></span>
 </div>
 
@@ -721,6 +730,7 @@ const I18N = {
   uk: {
     title: "Графіки", range_label: "Період:",
     opt_1h: "1 година", opt_6h: "6 годин", opt_24h: "24 години", opt_7d: "7 днів", opt_30d: "30 днів", opt_90d: "90 днів",
+    opt_custom: "Свій період…", btn_apply: "Показати",
     chart_ups_power: "Потужність UPS out (споживання)",
     chart_batt_power: "Потужність батареї (+ заряд / - розряд)",
     chart_soc: "Заряд батареї (SOC)",
@@ -731,6 +741,7 @@ const I18N = {
   en: {
     title: "Charts", range_label: "Period:",
     opt_1h: "1 hour", opt_6h: "6 hours", opt_24h: "24 hours", opt_7d: "7 days", opt_30d: "30 days", opt_90d: "90 days",
+    opt_custom: "Custom range…", btn_apply: "Show",
     chart_ups_power: "UPS out power (consumption)",
     chart_batt_power: "Battery power (+ charge / - discharge)",
     chart_soc: "Battery charge (SOC)",
@@ -747,11 +758,19 @@ const MONTHS_SHORT = {
 };
 
 let currentRangeHours = 24;
+let customFromTs = null, customToTs = null; // не null - в режимі "свій період"
 let lastPoints = [];
 let lastFrom = 0, lastTo = 0;
 
+// Тривалість поточного запиту в годинах - для вибору формату підписів осі X
+// (formatAxisTime), працює однаково і для пресетів, і для свого періоду.
+function axisRangeHours() {
+  if (customFromTs !== null && customToTs !== null) return (customToTs - customFromTs) / 3600;
+  return currentRangeHours;
+}
+
 function formatAxisTime(date) {
-  if (currentRangeHours <= 48) {
+  if (axisRangeHours() <= 48) {
     return date.toLocaleTimeString(lang === 'uk' ? 'uk-UA' : 'en-US', {hour: '2-digit', minute: '2-digit'});
   }
   return `${date.getDate()} ${MONTHS_SHORT[lang][date.getMonth()]}`;
@@ -858,7 +877,10 @@ function renderAll() {
 
 async function loadHistory() {
   try {
-    const r = await fetch(`/api/history?hours=${currentRangeHours}&points=400`);
+    const url = (customFromTs !== null && customToTs !== null)
+      ? `/api/history?from=${customFromTs}&to=${customToTs}&points=400`
+      : `/api/history?hours=${currentRangeHours}&points=400`;
+    const r = await fetch(url);
     const d = await r.json();
     lastPoints = d.points || [];
     lastFrom = d.from;
@@ -868,8 +890,43 @@ async function loadHistory() {
   } catch (e) { console.error(e); }
 }
 
+// datetime-local очікує "YYYY-MM-DDTHH:MM" у ЛОКАЛЬНОМУ часі браузера -
+// формуємо вручну (toISOString() дав би UTC, що зсунуло б значення).
+function toLocalInputValue(date) {
+  const p = n => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())}T${p(date.getHours())}:${p(date.getMinutes())}`;
+}
+
 document.getElementById('rangeSel').addEventListener('change', function() {
+  const customRangeEl = document.getElementById('customRange');
+  if (this.value === 'custom') {
+    customRangeEl.style.display = 'inline-flex';
+    // Перший раз - підставляємо останні 24 години як стартову точку відліку,
+    // далі користувач сам підправляє поля під потрібний період.
+    if (!document.getElementById('customFrom').value) {
+      const now = new Date();
+      const from = new Date(now.getTime() - 24 * 3600 * 1000);
+      document.getElementById('customFrom').value = toLocalInputValue(from);
+      document.getElementById('customTo').value = toLocalInputValue(now);
+    }
+    return; // застосовується кнопкою "Показати", не одразу при виборі
+  }
+  customRangeEl.style.display = 'none';
+  customFromTs = null;
+  customToTs = null;
   currentRangeHours = parseInt(this.value, 10);
+  loadHistory();
+});
+
+document.getElementById('customApply').addEventListener('click', function() {
+  const fromVal = document.getElementById('customFrom').value;
+  const toVal = document.getElementById('customTo').value;
+  if (!fromVal || !toVal) return;
+  const fromTs = Math.floor(new Date(fromVal).getTime() / 1000);
+  const toTs = Math.floor(new Date(toVal).getTime() / 1000);
+  if (fromTs >= toTs) return;
+  customFromTs = fromTs;
+  customToTs = toTs;
   loadHistory();
 });
 

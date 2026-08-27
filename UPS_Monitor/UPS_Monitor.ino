@@ -372,12 +372,22 @@ void setupRoutes() {
   // історичної телеметрії). range/points -> historyQueryJson() у history.h,
   // де відбувається вибір рівня деталізації та проріджування.
   server.on("/api/history", HTTP_GET, [](AsyncWebServerRequest *request){
+    uint32_t points = 300;
+    if (request->hasParam("points")) points = (uint32_t)request->getParam("points")->value().toInt();
+
+    // Довільний період (абсолютні unix-timestamp) - пріоритетний, якщо
+    // задані обидва параметри. Інакше - старий спосіб "N годин/днів від
+    // зараз" (пресети на сторінці графіків).
+    if (request->hasParam("from") && request->hasParam("to")) {
+      uint32_t fromTs = (uint32_t)request->getParam("from")->value().toInt();
+      uint32_t toTs   = (uint32_t)request->getParam("to")->value().toInt();
+      request->send(200, "application/json", historyQueryJsonRange(fromTs, toTs, points));
+      return;
+    }
+
     uint32_t rangeSeconds = 24UL * 3600; // за замовчуванням - останні 24 години
     if (request->hasParam("hours")) rangeSeconds = (uint32_t)request->getParam("hours")->value().toInt() * 3600UL;
     if (request->hasParam("days"))  rangeSeconds = (uint32_t)request->getParam("days")->value().toInt() * 86400UL;
-
-    uint32_t points = 300;
-    if (request->hasParam("points")) points = (uint32_t)request->getParam("points")->value().toInt();
 
     request->send(200, "application/json", historyQueryJson(rangeSeconds, points));
   });

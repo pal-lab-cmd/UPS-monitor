@@ -300,24 +300,31 @@ void historyOnSample(const Reading& batt, const Reading& psu, const Reading& ups
 }
 
 // ---------- API для графіків ----------
-// rangeSeconds - скільки секунд "углиб" від поточного моменту показати;
+// Основна функція - приймає АБСОЛЮТНІ межі діапазону (fromTs/toTs, unix-час),
+// а не "скільки секунд углиб від зараз". Це дозволяє запитувати довільний
+// період у минулому (напр. "позавчора з 14:00 до 18:00"), а не лише
+// "останні N годин від поточного моменту" - useDetail нижче керується саме
+// відстанню fromTs від "зараз", тож старий та новий спосіб виклику вибирають
+// рівень деталізації однаково.
+//
 // desiredPoints - бажана кількість точок (сервер сам проріджує дані так,
 // щоб віддати приблизно стільки, незалежно від фактичної роздільності
 // збереження - клієнту не треба знати про detail/long рівні взагалі).
 //
-// Обирає рівень автоматично: якщо запитаний діапазон вміщується у вікно
-// detail-рівня (HISTORY_DETAIL_DAYS) - береться detail (1 хв), інакше -
+// Обирає рівень автоматично: якщо fromTs потрапляє у вікно detail-рівня
+// (HISTORY_DETAIL_DAYS від "зараз") - береться detail (1 хв), інакше -
 // long (15 хв). Потужність по кожному каналу рахується тут з V*I - не
 // зберігається окремо (див. коментар до HistSample вище).
-String historyQueryJson(uint32_t rangeSeconds, uint32_t desiredPoints) {
+String historyQueryJsonRange(uint32_t fromTs, uint32_t toTs, uint32_t desiredPoints) {
   if (desiredPoints < 10) desiredPoints = 10;
   if (desiredPoints > 2000) desiredPoints = 2000;
 
   uint32_t now = (uint32_t)time(nullptr);
-  uint32_t fromTs = (now > rangeSeconds) ? (now - rangeSeconds) : 0;
+  if (toTs > now) toTs = now;       // не показуємо майбутнє
+  if (fromTs > toTs) fromTs = toTs; // захист від переплутаного/некоректного запиту
+
   uint32_t oldestValid = historyOldestValidTs();
   if (fromTs < oldestValid) fromTs = oldestValid; // не показуємо те, що вже "поза" обраним retention
-  uint32_t toTs = now;
 
   bool useDetail = (now - fromTs) <= (HISTORY_DETAIL_DAYS * 86400UL);
   HistRing& ring = useDetail ? histDetail : histLong;
@@ -358,6 +365,14 @@ String historyQueryJson(uint32_t rangeSeconds, uint32_t desiredPoints) {
   String json;
   serializeJson(doc, json);
   return json;
+}
+
+// Зручна обгортка "rangeSeconds секунд углиб від зараз" - лишається заради
+// сумісності викликів hours=/days= (див. UPS_Monitor.ino).
+String historyQueryJson(uint32_t rangeSeconds, uint32_t desiredPoints) {
+  uint32_t now = (uint32_t)time(nullptr);
+  uint32_t fromTs = (now > rangeSeconds) ? (now - rangeSeconds) : 0;
+  return historyQueryJsonRange(fromTs, now, desiredPoints);
 }
 
 // Текстовий дебаг-звіт (сирі значення, без проріджування) - швидко
