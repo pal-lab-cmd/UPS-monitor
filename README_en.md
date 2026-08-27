@@ -33,7 +33,8 @@ Board: `ESP32S3 Dev Module`, PSRAM: `OPI PSRAM`, Flash Size: `16MB`.
 - Battery state-of-charge (SOC%) via **coulomb counting** — integrating battery current over time, with IR compensation for voltage sag under load (`BATTERY_INTERNAL_RESISTANCE_OHM`) and self-calibration against two voltage reference points (SOC 100%/0%): reaching the "full" voltage resets the counter to 100%, reaching the "empty" voltage resets it to 0% and slowly adjusts the stored full capacity toward the actually observed capacity of the last discharge cycle (accounts for capacity fade over time)
 - Reading cache refreshed once a second (`SAMPLE_INTERVAL_MS`) in `loop()` — both HTTP and NUT read only from this cache, avoiding concurrent I2C access from different async contexts
 - Web UI (`/`) — voltage/current/power table per channel with battery SOC% and UPS-output load% shown right in the row label, refreshed every second, **UK/EN language switch**
-- Settings section (`/settings`) — WiFi, access password, date & time (NTP server, timezone: dropdown of common cities or a manual POSIX TZ field), battery calibration (capacity, SOC 100%/0% voltages), history retention period (actual history storage isn't implemented yet — this setting is ahead of that feature)
+- Historical readings and charts (`/history`) — a two-tier ring buffer on FFat (`history.h`): "detail" — 1 sample/min for the last `HISTORY_DETAIL_DAYS` (4) days, "long" — 1 sample/15 min for the full retention window (hard cap `HISTORY_RETENTION_DAYS_MAX` = 365 days); fixed-size files that overwrite their own oldest records in a ring, so flash usage never grows unbounded. The retention period chosen in `/settings/history` only trims what's returned on read, without changing file size. The detail level for a given chart request is chosen automatically by the server; downsampling (stride) returns roughly the requested number of points regardless of the underlying storage resolution
+- Settings section (`/settings`) — WiFi, access password, date & time (NTP server, timezone: dropdown of common cities or a manual POSIX TZ field), battery calibration (capacity, SOC 100%/0% voltages), history retention period
 - WiFi: credentials stored in `Preferences`, auto-connect on boot (up to 5 min of retries), fallback AP mode for initial setup, non-blocking reconnect in `loop()` if the link drops
 - OTA firmware updates via `/update` (ElegantOTA)
 - NUT server (port 3493) for integration with a NAS or other UPS monitoring systems
@@ -68,6 +69,9 @@ Board: `ESP32S3 Dev Module`, PSRAM: `OPI PSRAM`, Flash Size: `16MB`.
 | `/settings/history` | GET | yes* | History retention period form |
 | `/settings/history/save` | POST | yes* | Save history retention period |
 | `/api/history-settings` | GET | yes* | JSON with current retention period (for the form) |
+| `/history` | GET | none | Historical-readings chart page (intentionally open, same as `/api/data`) |
+| `/api/history` | GET | none | JSON with historical readings for charts. Params: `points` (desired point count, default 300), or `hours`/`days` (range back from now), or `from`/`to` (arbitrary period, unix timestamps, take priority if both given) |
+| `/api/history/debug` | GET | yes* | Text debug report on history storage (raw values, no downsampling) |
 | `/api/reboot` | POST | yes* | Manual device reboot |
 | `/update` | — | yes (ElegantOTA) | OTA firmware update |
 
@@ -77,6 +81,7 @@ Board: `ESP32S3 Dev Module`, PSRAM: `OPI PSRAM`, Flash Size: `16MB`.
 
 - Port: **3493** (standard NUT port)
 - UPS name: `esp32ups` (`config.h → NUT_UPS_NAME`)
+- A second, "mirror" UPS device on the same server/port: `qnapups` (`config.h → NUT_UPS_NAME_QNAP`) — the same readings under the name QNAP QTS (External Device → UPS → Network UPS slave) has hard-coded and does not let you edit in its GUI. The real QNAP client (`upsutil`) never sends `USERNAME`/`PASSWORD`/`LOGIN` at all — it goes straight to `LIST VAR`/`GET VAR` after connecting — so there are no separate credentials for `qnapups`: its read-only access isn't enforced by a password but structurally (the server doesn't implement `SET`/`INSTCMD` for either device)
 - Supported commands: `USERNAME`, `PASSWORD`, `LOGIN`, `LOGOUT`, `PRIMARY`/`MASTER`, `STARTTLS` (proper rejection), `VER`, `NETVER`, `LIST UPS/VAR/RW/CMD/CLIENT`, `GET VAR/TYPE/DESC/UPSDESC/NUMLOGINS`
 - **Authentication is not required for reads** — `LIST VAR`/`GET VAR` don't require a prior login. This is intentional: QNAP QTS (External Device → UPS → Network UPS slave) has no login/password fields at all, only a server IP address — so for compatibility, reads stay open on the local network
 - `NUT_PASS` is only checked if a client actually sends a `PASSWORD` command (e.g. `upsmon` on Linux)
@@ -113,4 +118,3 @@ Besides resistance and offset, each channel also has a `currentSign` field (`+1`
 - The "amount discharged since the last full-charge anchor" counter (used to self-calibrate battery capacity during coulomb counting) lives only in RAM — if the device reboots between the SOC100/SOC0 reference points, capacity learning for that particular discharge cycle is lost (the charge state itself is unaffected, since it's persisted separately)
 - `NUT_PASS` is currently only set in `config.h`, not via the UI (unlike `AUTH_DEFAULT_PASS`)
 - No NUT instant commands (`LIST CMD` is always empty) — control actions (e.g. a test discharge) are not implemented
-- No history of readings is stored — only the current state (the retention-period setting already exists, the history itself doesn't yet)

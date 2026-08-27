@@ -7,4 +7,4 @@ INA3221 проапгрейджена, до силових контактів д�
 IMPORTANT!
 
 INA3221 has been customized. The shunts were updated, added R010 shunts in parallel to existing.
-It is required for high poered device with 100W poer output.
+It is required for high powered device with 100W poer output.
