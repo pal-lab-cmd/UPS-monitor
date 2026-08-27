@@ -11,6 +11,7 @@
 #include "history.h"
 #include "web_pages.h"
 #include "nut_server.h"
+#include "sleep.h"
 
 Preferences prefs;
 AsyncWebServer server(80);
@@ -468,17 +469,30 @@ void setupRoutes() {
 void setup() {
   Serial.begin(115200);
   delay(300);
+  sleepLogWakeReason();
+
+  bool inaOk = ina.begin();
+  sleepSetupPowerValid();
+
+  loadBatterySettings();
+  forceSample();          // перше заповнення кешу - перший виклик у циклі coulomb-каунтер свідомо ігнорує (див. updateCoulombCounter), тож порядок з loadCoulombState() нижче безпечний
+  loadCoulombState();     // має йти ДО перевірки швидкого шляху нижче - інакше saveCoulombState() всередині sleepEnterDeepSleep() перезаписала б збережений стан нулями
+
+  // Швидкий шлях для підстрахувального таймерного пробудження: якщо
+  // живлення й досі відсутнє на обох каналах - одразу назад у сон, БЕЗ
+  // WiFi/сервера/NUT взагалі. Це і дає основну економію - такий цикл
+  // займає долі секунди на низькому струмі замість кількох секунд на
+  // струмі активного WiFi-радіо (див. пояснення в чаті).
+  if (wokeFromTimerRecheck && sleepConditionNow()) {
+    Serial.println("Підстрахувальна перевірка: живлення й досі відсутнє - назад у сон без WiFi");
+    sleepEnterDeepSleep(); // не повертається
+  }
+
+  Serial.println(inaOk ? "INA3221 OK" : "INA3221 НЕ ВІДПОВІДАЄ — перевір I2C підключення");
 
   checkFactoryReset();
   loadAuthPass();
-  loadBatterySettings();
   historyBegin(loadHistoryRetentionDays());
-
-  bool inaOk = ina.begin();
-  Serial.println(inaOk ? "INA3221 OK" : "INA3221 НЕ ВІДПОВІДАЄ — перевір I2C підключення");
-
-  forceSample();         // перше заповнення кешу - потрібне вже тут для стартової оцінки SOC нижче
-  loadCoulombState();
 
   if (connectWiFi()) {
     setupTime(); // NTP має сенс лише за наявності інтернету, тож саме тут
@@ -499,4 +513,5 @@ void loop() {
   ElegantOTA.loop();
   checkWiFiConnection();
   sampleReadings();
+  sleepCheckCondition();
 }

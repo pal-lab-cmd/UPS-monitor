@@ -1,6 +1,6 @@
 #pragma once
 // визначаємо версію
-#define FW_VERSION "0.1.10"
+#define FW_VERSION "0.2.0"
 // ---------- I2C / INA3221 ----------
 #define I2C_SDA 8
 #define I2C_SCL 9
